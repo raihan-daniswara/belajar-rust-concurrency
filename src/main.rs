@@ -8,7 +8,11 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::thread;
-    use std::{sync::Arc, time::Duration};
+    use std::{
+        cell::{Cell, RefCell},
+        sync::{Arc, Barrier, Once},
+        time::Duration,
+    };
 
     #[test]
     fn test_create_thread() {
@@ -290,5 +294,119 @@ mod tests {
         }
 
         println!("Counter: {}", counter.load(Ordering::Relaxed))
+    }
+
+    #[test]
+    fn test_mutex() {
+        use std::sync::{Arc, Mutex};
+
+        let counter: Arc<Mutex<i64>> = Arc::new(Mutex::new(0));
+        let mut handlers = vec![];
+
+        for _ in 0..10 {
+            let counter_clone = Arc::clone(&counter);
+            let handler = thread::spawn(move || {
+                for _ in 0..1000000 {
+                    let mut data = counter_clone.lock().unwrap();
+                    *data += 1;
+                }
+            });
+            handlers.push(handler);
+        }
+
+        for handler in handlers {
+            handler.join().unwrap()
+        }
+
+        println!("Counter: {}", *counter.lock().unwrap())
+    }
+
+    thread_local! {
+        pub static NAME: RefCell<String> = RefCell::new("Default".to_string())
+    }
+    thread_local! {
+        pub static OTHER_NAME: RefCell<String> = RefCell::new("Default".to_string())
+    }
+
+    #[test]
+    fn test_thread_local() {
+        let handler = thread::spawn(|| {
+            NAME.with_borrow_mut(|name| *name = "Budi".to_string());
+
+            NAME.with_borrow(|name| println!("Hello, {}", name));
+        });
+
+        handler.join().unwrap();
+
+        {
+            NAME.with_borrow_mut(|name| *name = "Andi".to_string());
+            NAME.with_borrow(|name| println!("Hello, {}", name))
+        }
+
+        NAME.with_borrow(|name| println!("Hello, {}", name))
+    }
+
+    #[test]
+    fn test_thread_panic() {
+        let handle = thread::spawn(|| panic!("Oops! Something went wrong!"));
+
+        match handle.join() {
+            Ok(_) => println!("Thread Finished"),
+            Err(_) => println!("Thread Panic"),
+        }
+
+        println!("Application Finished")
+    }
+
+    #[test]
+    fn test_barrier() {
+        let barrier = Arc::new(Barrier::new(10));
+        let mut handlers = vec![];
+
+        for i in 0..10 {
+            let barrier_clone = Arc::clone(&barrier);
+            let handler = thread::spawn(move || {
+                println!("Join Gamer-{}", i);
+                barrier_clone.wait();
+                println!("Gamer-{} Start", i)
+            });
+
+            handlers.push(handler)
+        }
+
+        for handler in handlers {
+            handler.join().unwrap()
+        }
+    }
+
+    static mut TOTAL_COUNTER: i32 = 0;
+    static TOTAL_INIT: Once = Once::new();
+
+    fn get_total() -> i32 {
+        unsafe {
+            TOTAL_INIT.call_once(|| {
+                println!("Call Once");
+                TOTAL_COUNTER += 1
+            });
+            TOTAL_COUNTER
+        }
+    }
+
+    #[test]
+    fn test_once() {
+        let mut handlers = vec![];
+
+        for _ in 0..10 {
+            let handler = thread::spawn(move || {
+                let total = get_total();
+                println!("Total: {}", total)
+            });
+
+            handlers.push(handler)
+        }
+
+        for handler in handlers {
+            handler.join().unwrap()
+        }
     }
 }
