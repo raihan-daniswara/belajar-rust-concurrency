@@ -7,6 +7,8 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    use tokio::runtime::Runtime;
+
     use super::thread;
     use std::{
         cell::{Cell, RefCell},
@@ -408,5 +410,64 @@ mod tests {
         for handler in handlers {
             handler.join().unwrap()
         }
+    }
+
+    async fn get_async_data() -> String {
+        thread::sleep(Duration::from_secs(2));
+        return "Hello form async".to_string();
+    }
+
+    #[tokio::test]
+    async fn test_async() {
+        let data = get_async_data();
+        let result = data.await;
+        println!("{}", result)
+    }
+
+    async fn get_database_data(time: u64) -> String {
+        println!("{:?} : get database data", thread::current().id());
+        tokio::time::sleep(Duration::from_secs(time)).await;
+        println!("{:?} : hello from database", thread::current().id());
+
+        return "Hello from database".to_string();
+    }
+
+    #[tokio::test]
+    async fn test_concurrent() {
+        let mut handlers = vec![];
+        for i in 0..10 {
+            let handler = tokio::spawn(get_database_data(i));
+            handlers.push(handler);
+        }
+        for handler in handlers {
+            let data = handler.await.unwrap();
+            println!("{}", data)
+        }
+    }
+
+    async fn run_concurrent(runtime: Arc<Runtime>) {
+        let mut handlers = vec![];
+        for i in 0..5 {
+            let handler = runtime.spawn(get_database_data(i));
+            handlers.push(handler);
+        }
+        for handler in handlers {
+            let data = handler.await.unwrap();
+            println!("{}", data)
+        }
+    }
+
+    #[test]
+    fn test_runtime() {
+        let runtime = Arc::new(
+            tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(15)
+                .enable_time()
+                .build()
+                .unwrap(),
+        );
+
+        // mejalankan async function di dalam runtime
+        runtime.block_on(run_concurrent(Arc::clone(&runtime)))
     }
 }
